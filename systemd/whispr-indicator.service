@@ -1,0 +1,22 @@
+[Unit]
+Description=whispr-local status-bar indicator (tray icon)
+Documentation=file://%h/Projects/whispr-local/docs/design/v1_design.md
+# The indicator only reflects/controls the Daemon; start it alongside, but it
+# degrades gracefully to a "daemon not running" icon if the Daemon is down.
+After=whispr.service graphical-session.target
+Wants=whispr.service
+PartOf=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Runs under SYSTEM python (needs python3-gi + Ayatana AppIndicator, which the lean
+# inference venv deliberately lacks). @REPO@ is substituted by scripts/setup-user.sh.
+# whispr.indicator imports only whispr.ipc (pure stdlib), so PYTHONPATH=src suffices.
+Environment=PYTHONPATH=@REPO@/src
+ExecStart=/usr/bin/python3 -m whispr.indicator
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

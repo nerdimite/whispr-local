@@ -64,6 +64,26 @@ systemctl --user reset-failed whispr.service 2>/dev/null || true
 systemctl --user enable --now whispr.service
 sleep 8  # give the NPU model (~9s first compile) time to warm before status
 
+# --- 2b. whispr-indicator --user service (status-bar tray icon) -----------
+# Runs under system python (needs python3-gi + Ayatana AppIndicator); the lean
+# inference venv deliberately lacks gi. Warn if those system packages are missing.
+say "Installing + starting the whispr status-bar indicator"
+if ! /usr/bin/python3 -c "import gi; gi.require_version('Gtk','3.0')" 2>/dev/null; then
+  warn "python3-gi / GTK3 not found for /usr/bin/python3. Install with:"
+  warn "  sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1"
+  warn "then re-run this script. Skipping the indicator for now."
+else
+  sed -e "s#@REPO@#$REPO_DIR#g" \
+    "$REPO_DIR/systemd/whispr-indicator.service" > "$CONFIG_HOME/systemd/user/whispr-indicator.service"
+  systemctl --user daemon-reload
+  systemctl --user reset-failed whispr-indicator.service 2>/dev/null || true
+  systemctl --user enable --now whispr-indicator.service
+  if ! gnome-extensions info ubuntu-appindicators@ubuntu.com 2>/dev/null | grep -qi 'State: ACTIVE'; then
+    warn "The 'Ubuntu AppIndicators' GNOME extension isn't active — the tray icon"
+    warn "may not show. Enable it: gnome-extensions enable ubuntu-appindicators@ubuntu.com"
+  fi
+fi
+
 # --- 3. Bind Super+\ → whispr toggle --------------------------------------
 say "Binding Super+\\ to 'whispr toggle' via gsettings"
 KEYPATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/whispr/"
@@ -103,5 +123,6 @@ uv run --project "$REPO_DIR" whispr status || warn "Daemon not answering yet; ch
 # --- Done ------------------------------------------------------------------
 say "Setup complete"
 echo "  • Super+\\           → start/stop a Dictation"
+echo "  • Tray icon         → live state + Start/stop/Cancel menu (top bar)"
 echo "  • whispr status     → State + active device (NPU/CPU)"
 echo "  • journalctl --user -u whispr -f   → Daemon logs (device won, load time)"

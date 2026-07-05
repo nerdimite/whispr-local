@@ -66,6 +66,10 @@ Then do the first dictation into any text field.
 | `journalctl --user -u whispr -f` | Watch the daemon live (device, rms, transcript, paste) |
 | `systemctl --user restart whispr` | Restart the daemon (after a config change) |
 
+**Status-bar icon:** a microphone icon sits in the GNOME top bar (idle → recording → transcribing).
+Click it for a menu: **Start/stop dictation**, **Cancel recording**, **Quit**. It's a separate process
+(`whispr-indicator.service`) that polls the daemon, so it never blocks dictation.
+
 **Clipboard note:** the transcript stays on the clipboard after pasting, so if the wrong window
 was focused you can just `Ctrl+V` again where you meant to.
 
@@ -119,7 +123,10 @@ headset can't feed it silence.
   only ~0.3 s/utterance on the NPU. Export it with `scripts/export-model.sh openai/whisper-small`
   and set `model_path` to `~/.local/share/whispr/models/whisper-small` (first NPU compile of the
   bigger model takes ~30 s, then it's cached).
-- **No tray icon yet** — MVP-1 (needs the GLib loop the daemon currently omits).
+- **Status-bar indicator** runs as a separate process under system `python3` (needs `python3-gi` +
+  `gir1.2-ayatanaappindicator3-0.1` and the *Ubuntu AppIndicators* GNOME extension, both default on
+  Ubuntu). The lean inference venv has no `gi`, so the indicator is deliberately decoupled and polls
+  the daemon over the socket rather than living inside it.
 
 ---
 
