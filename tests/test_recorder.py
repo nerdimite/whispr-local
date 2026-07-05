@@ -55,3 +55,47 @@ def test_stop_with_no_frames_returns_empty():
     assert result.ndim == 1
     assert result.dtype == np.float32
     assert len(result) == 0
+
+
+def test_start_recovers_when_portaudio_wedges():
+    # A long-lived daemon can wedge PortAudio into "not initialized"; the first
+    # stream.start() then throws. The Recorder should reset the audio backend and
+    # rebuild the stream once, so the user's single press still records.
+    attempts = {"n": 0}
+    resets = {"n": 0}
+
+    def factory(callback):
+        attempts["n"] += 1
+        fail = attempts["n"] == 1  # first build's start() wedges, second is clean
+        return WedgingStream(callback, fail=fail)
+
+    recorder = Recorder(stream_factory=factory, reset_backend=lambda: resets.__setitem__("n", resets["n"] + 1))
+    recorder.start()
+
+    assert attempts["n"] == 2  # rebuilt once
+    assert resets["n"] == 1  # backend reset before the retry
+    assert recorder._stream.started is True
+
+
+def test_start_does_not_reset_backend_on_success():
+    resets = {"n": 0}
+    factory = make_fake_factory([])
+    recorder = Recorder(stream_factory=factory, reset_backend=lambda: resets.__setitem__("n", resets["n"] + 1))
+    recorder.start()
+    assert resets["n"] == 0  # healthy path never touches the backend
+
+
+class WedgingStream:
+    def __init__(self, callback, fail):
+        self._callback = callback
+        self._fail = fail
+        self.started = False
+        self.closed = False
+
+    def start(self):
+        if self._fail:
+            raise RuntimeError("Error starting stream: PortAudio not initialized [PaErrorCode -10000]")
+        self.started = True
+
+    def close(self):
+        self.closed = True
