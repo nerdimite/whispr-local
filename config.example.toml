@@ -5,7 +5,9 @@
 device = "NPU"
 
 # Exported OpenVINO Whisper model dir. Default: ~/.local/share/whispr/models/whisper-base
-# model_path = "~/.local/share/whispr/models/whisper-base"
+# whisper-small is more accurate and still ~0.3s/utterance on the NPU — export it with
+# `scripts/export-model.sh openai/whisper-small` and point model_path at it:
+# model_path = "~/.local/share/whispr/models/whisper-small"
 
 # OpenVINO compile cache — makes Daemon restarts fast. Default: ~/.cache/whispr/ov
 # cache_dir = "~/.cache/whispr/ov"

@@ -95,7 +95,7 @@ uv sync --project "$REPO_DIR" --extra npu
 # --- 5. Offer to export the Whisper model ---------------------------------
 if [[ ! -f "$MODEL_DIR/openvino_encoder_model.xml" ]]; then
   say "No Whisper model found at $MODEL_DIR"
-  read -r -p "Export openai/whisper-base now (int8, runs on CPU)? [Y/n] " ans
+  read -r -p "Export openai/whisper-base now (int8, runs on the NPU)? [Y/n] " ans
   if [[ "${ans:-Y}" =~ ^[Yy]?$ ]]; then
     "$REPO_DIR/scripts/export-model.sh"
   else

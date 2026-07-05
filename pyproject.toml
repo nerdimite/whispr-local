@@ -13,35 +13,23 @@ dependencies = [
 whispr = "whispr.cli:main"
 
 [project.optional-dependencies]
-# Heavy NPU / OpenVINO stack. Pins resolved in slice-transcriber (design open question #1).
-# Kept optional so the pure core + seam tests install and run without the NPU wheel matrix.
+# NPU inference runtime — deliberately LEAN. WhisperPipeline reads the exported
+# OpenVINO IR directly, so inference needs none of torch/transformers/optimum/nncf
+# (those are export-only; see scripts/export-model.sh, which builds its own
+# ephemeral venv). Pinned to the 2025.3 line: the Whisper "decoder-with-past" NPU
+# path that actually runs on Lunar Lake was REMOVED in OpenVINO 2026.0, so 2026.x
+# compiles but throws at generate(). 2025.3 is the last release where NPU Whisper
+# works end-to-end. See docs + memory npu-whisper-inference-broken (now fixed).
 npu = [
-    "openvino-genai==2026.2.1",
-    "optimum-intel==1.25.2",
-    "transformers==4.51.3",
-    "nncf==2.18.0",
-    "onnx==1.18.0",
-    # torch is a transitive dep (optimum/transformers) used only at model-export
-    # time to load the HF model before OpenVINO conversion — inference is 100% on
-    # the NPU via OpenVINO. CPU-only build (avoids ~5 GB of CUDA wheels), pinned
-    # < 2.6 because optimum 1.27's ONNX exporter imports `_attention_scale` from
-    # torch.onnx.symbolic_opset14, removed in torch 2.6+.
-    "torch==2.5.1",
+    "openvino-genai==2025.3.0.0",
+    "openvino==2025.3.0",
+    "openvino-tokenizers==2025.3.0.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest",
 ]
-
-# Pull torch from PyTorch's CPU-only index so no nvidia-cu12 wheels are dragged in.
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cpu" }
 
 [build-system]
 requires = ["hatchling"]
