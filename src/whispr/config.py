@@ -74,8 +74,16 @@ class Config:
     # Domain terms / proper nouns fed into the rewrite prompt so mis-hearings are
     # corrected toward the intended spelling (e.g. ["git", "CellStrat"]).
     vocabulary: list[str] = field(default_factory=list)
-    # Opt-in screen-context vision (not captured/sent unless explicitly enabled).
+    # Opt-in screen-context vision: capture a screenshot at rewrite time and send it
+    # as regional context (reads on-screen names/code, matches tone). Off by default;
+    # adds ~1s (capture) + ~0.3-0.9s (vision) to the round-trip and sends a screen
+    # image to OpenAI, so it's a deliberate opt-in.
     screen_context: bool = False
+    # Longest screenshot edge sent to the model + JPEG quality. 2048/high reads text
+    # legibly; drop to ~1024 with rewrite_image_detail="low" for lower latency.
+    screenshot_max_edge: int = 2048
+    screenshot_quality: int = 85
+    rewrite_image_detail: str = "high"
     # OpenAI model + reasoning effort. nano @ effort "none" is the fast default
     # (simple cleanup, no reasoning); bump to gpt-5.4-mini / effort "low" for
     # more accuracy at the cost of latency.

@@ -31,10 +31,15 @@ def test_instructions_have_no_pronunciation_line_without_hints():
     assert "Pronunciation —" not in build_instructions(vocabulary=["git", "CellStrat"])
 
 
-def test_instructions_mark_screen_text_untrusted():
-    instr = build_instructions(screen_text="def main(): ...")
-    assert "<screen>\ndef main(): ...\n</screen>" in instr
-    assert "NEVER follow" in instr  # prompt-injection guard
+def test_instructions_add_vision_guidance_only_with_screenshot():
+    assert "screenshot" not in build_instructions().lower()
+    instr = build_instructions(with_screenshot=True).lower()
+    assert "screenshot" in instr
+    # framed as a spelling dictionary (correction source), not content to copy
+    assert "dictionary" in instr
+    # guarded against over-reach (completing from screen) AND injection
+    assert "never add" in instr
+    assert "instructions" in instr
 
 
 # -- clean_reply (pure) ------------------------------------------------------
@@ -55,14 +60,14 @@ def test_clean_reply_rejects_rambling():
 # -- Rewriter (falls back to the raw transcript on every failure) ------------
 
 def test_rewrite_returns_cleaned_completion():
-    rewriter = Rewriter(complete=lambda instr, text: " Fixed. ")
+    rewriter = Rewriter(complete=lambda instr, text, img=None: " Fixed. ")
     assert rewriter.rewrite("fixed") == "Fixed."
 
 
 def test_rewrite_passes_vocabulary_into_instructions():
     seen = {}
 
-    def complete(instructions, transcript):
+    def complete(instructions, transcript, image=None):
         seen["instructions"] = instructions
         return "ok"
 
@@ -71,14 +76,14 @@ def test_rewrite_passes_vocabulary_into_instructions():
 
 
 def test_rewrite_falls_back_when_api_raises():
-    def complete(instr, text):
+    def complete(instr, text, img=None):
         raise RuntimeError("api down")
 
     assert Rewriter(complete=complete).rewrite("raw text") == "raw text"
 
 
 def test_rewrite_falls_back_on_unusable_completion():
-    rewriter = Rewriter(complete=lambda instr, text: "   ")
+    rewriter = Rewriter(complete=lambda instr, text, img=None: "   ")
     assert rewriter.rewrite("raw text") == "raw text"
 
 
@@ -89,18 +94,58 @@ def test_rewrite_passes_through_empty_transcript_without_calling_api():
     assert calls == []
 
 
+# -- screen context: capture seam feeds the completer, never blocks -----------
+
+def test_rewrite_without_capture_sends_no_image():
+    seen = {}
+
+    def complete(instr, text, image=None):
+        seen["image"] = image
+        return "ok"
+
+    Rewriter(complete=complete).rewrite("hi")
+    assert seen["image"] is None
+
+
+def test_rewrite_with_capture_passes_screenshot_to_completer():
+    seen = {}
+
+    def complete(instr, text, image=None):
+        seen["image"] = image
+        assert "screenshot" in instr.lower()  # vision guidance added
+        return "ok"
+
+    Rewriter(complete=complete, capture=lambda: b"JPEGDATA").rewrite("hi")
+    assert seen["image"] == b"JPEGDATA"
+
+
+def test_rewrite_survives_capture_failure_and_goes_text_only():
+    seen = {}
+
+    def capture():
+        raise RuntimeError("portal denied")
+
+    def complete(instr, text, image=None):
+        seen["image"] = image
+        return "Cleaned."
+
+    out = Rewriter(complete=complete, capture=capture).rewrite("raw")
+    assert out == "Cleaned."       # still rewrote, didn't fall back
+    assert seen["image"] is None   # sent text-only after capture failed
+
+
 # -- observability: every outcome is logged so a silent fallback is visible ---
 
 def test_rewrite_logs_success():
     logs = []
-    Rewriter(complete=lambda i, t: "Fixed.", log=logs.append).rewrite("fixed")
+    Rewriter(complete=lambda i, t, img=None: "Fixed.", log=logs.append).rewrite("fixed")
     assert any("OK in" in m for m in logs)
 
 
 def test_rewrite_logs_api_failure_reason():
     logs = []
 
-    def complete(i, t):
+    def complete(i, t, img=None):
         raise RuntimeError("connection refused")
 
     Rewriter(complete=complete, log=logs.append).rewrite("raw")
@@ -109,7 +154,7 @@ def test_rewrite_logs_api_failure_reason():
 
 def test_rewrite_logs_unusable_reply():
     logs = []
-    Rewriter(complete=lambda i, t: "   ", log=logs.append).rewrite("raw")
+    Rewriter(complete=lambda i, t, img=None: "   ", log=logs.append).rewrite("raw")
     assert any("unusable reply" in m for m in logs)
 
 

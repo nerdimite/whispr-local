@@ -26,9 +26,11 @@ thin adapter. Three jobs:
    without changing meaning. ✅ shipped.
 2. **Custom vocabulary.** A user-configured `vocabulary = [...]` of domain terms / proper nouns fed
    into the prompt so the model corrects mis-hearings toward the intended words. ✅ shipped.
-3. **Screen context (vision).** Capture the focused window and feed it to the model's vision path so
-   the rewrite matches the surrounding text (code vs prose vs chat). ⏳ flag exists
-   (`screen_context`), capture not yet wired.
+3. **Screen context (vision).** Capture the screen and feed it to the model's vision path so it
+   corrects garbled jargon toward on-screen terms and matches the register. ⚠️ shipped but off by
+   default (`screen_context`): capture works (xdg portal, downscale to 2048px, delete-after) and the
+   prompt actively scans the screen for sound-alikes, but two rough edges keep it opt-in — see
+   backlog.
 
 ### Shipped now: cloud backend (OpenAI Responses API)
 
@@ -70,6 +72,18 @@ Still OOMs at the model-load/trace step regardless.
 
 ## Backlog (smaller, independent)
 
+- **Quiet screen capture** — the xdg-portal Screenshot triggers GNOME's shutter flash + sound on
+  every capture (it calls the shell's screenshot handler; no per-call suppress). Replace with a
+  **PipeWire screencast** session (what screen-sharing uses): no flash/sound, one-time "share your
+  screen" approval at daemon start, then silent frame grabs. This is the blocker to turning
+  `screen_context` on by default.
+- **OCR screen context (vs. vision)** — nano's vision under-reads dense small text off the
+  2048px-capped image (missed "we land"→"Wayland" until the prompt was pushed hard). OCR the
+  **native-res** capture (Tesseract; Tesseract is accurate on crisp screen text — resolution, not
+  density, was the problem) and feed the extracted text as cheap context — likely more reliable for
+  jargon correction and works on a text-only model. `liteparse` bundles Tesseract but needs
+  ImageMagick for images (or a Pillow PNG→PDF shim); plain `pytesseract` + system tesseract is the
+  other option. Could also complement vision (text for exact strings, image for layout/register).
 - **Push-to-talk mode** — hold `Super+W` to record, release to transcribe+paste (vs toggle).
 - **Tray error state** — distinct indicator glyph when a transcription/paste fails (today: idle /
   recording / transcribing / down only).

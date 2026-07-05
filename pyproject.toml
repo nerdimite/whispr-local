@@ -11,6 +11,11 @@ dependencies = [
     # for now — local on-device Gemma is deferred (OOMs on export/inference on
     # 30 GB RAM; see docs/ROADMAP.md). Lightweight pure-python HTTP client.
     "openai>=2.0",
+    # Optional screen-context vision (config.screen_context): xdg-desktop-portal
+    # screenshot over DBus (pure-python, no gi) + downscale. Lazily imported, so
+    # they only load when screen_context is on.
+    "dbus-fast>=2.0",
+    "pillow>=10.0",
 ]
 
 [project.scripts]

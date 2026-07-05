@@ -210,10 +210,16 @@ def _build_from_config(config):
     if config.rewrite:
         from .rewriter import Rewriter, make_openai_completer
 
+        capture = None
+        if config.screen_context:
+            from .screenshot import make_screenshot_capturer
+
+            capture = make_screenshot_capturer(config)
         rewriter = Rewriter(
             complete=make_openai_completer(config),
             vocabulary=config.vocabulary,
             log=lambda msg: print(f"whispr: {msg}", flush=True),
+            capture=capture,
         )
     dump_to = (config.cache_dir / "last_recording.wav") if config.dump_last_recording else None
     return recorder, transcriber, injector, rewriter, notifier, dump_to
