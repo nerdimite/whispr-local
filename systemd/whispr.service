@@ -1,0 +1,24 @@
+[Unit]
+Description=whispr-local dictation Daemon (warm Whisper on the NPU)
+Documentation=file://%h/Projects/whispr-local/docs/design/v1_design.md
+# ydotoold provides the /dev/uinput backend used for paste injection (ADR-0002).
+After=ydotoold.service
+Wants=ydotoold.service
+# Don't let a transient crash-loop rate-limit us into a hard failed state.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# @UV@ and @REPO@ are substituted by scripts/setup-user.sh with the absolute uv
+# binary path and repo path (systemd --user has a minimal PATH, so no bare `uv`).
+ExecStart=@UV@ run --project @REPO@ whispr daemon
+# The injector shells out to `ydotool key ctrl+v`; point it at ydotoold's socket
+# so paste works regardless of the client's compiled-in default (%t = /run/user/<uid>).
+Environment=YDOTOOL_SOCKET=%t/.ydotool_socket
+Restart=on-failure
+RestartSec=2
+# The NPU model load can take ~5-15s on first compile; don't count that as a hang.
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

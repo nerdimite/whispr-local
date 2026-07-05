@@ -1,0 +1,22 @@
+# Copy to ~/.config/whispr/config.toml and edit. Every field is optional;
+# omitted fields fall back to the defaults shown here.
+
+# "NPU" (default, auto-falls-back to CPU if the NPU won't initialize) or "CPU".
+device = "NPU"
+
+# Exported OpenVINO Whisper model dir. Default: ~/.local/share/whispr/models/whisper-base
+# model_path = "~/.local/share/whispr/models/whisper-base"
+
+# OpenVINO compile cache — makes Daemon restarts fast. Default: ~/.cache/whispr/ov
+# cache_dir = "~/.cache/whispr/ov"
+
+# Desktop notifications (recording / transcribing / no-speech / CPU-fallback).
+notify = true
+
+# Debug: dump the last captured audio to <cache_dir>/last_recording.wav.
+dump_last_recording = false
+
+# Capture device: omit/null = system default, an integer index, or a name substring
+# (e.g. "Digital Microphone"). Pin this if a bluetooth headset keeps stealing the
+# default input and feeding whispr silence. See `whispr`'s logged device list.
+# input_device = "pipewire"
