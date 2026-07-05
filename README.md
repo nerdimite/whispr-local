@@ -5,7 +5,7 @@ On-device Whisper dictation for Ubuntu GNOME/Wayland. Press **`Super+\`**, speak
 Lunar Lake **NPU** (~0.1 s per short utterance, ~4× faster than CPU), falling back to CPU
 automatically if the NPU is unavailable.
 
-> Design & decisions: `docs/design/v1_design.md`, `docs/adr/`, `CONTEXT.md`.
+> Design & decisions: `docs/design/v1_design.md`, `docs/adr/`, `CONTEXT.md`. Future work: `docs/ROADMAP.md`.
 
 ---
 
