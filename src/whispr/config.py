@@ -65,11 +65,33 @@ class Config:
     # a typical laptop-mic noise floor; tune from the daemon's logged rms if speech is
     # dropped (lower it) or ambient still transcribes (raise it).
     silence_threshold: float = 0.02
+    # --- dictation-copilot rewrite stage (cloud OpenAI for now, see ROADMAP) --
+    # Off by default. When true the daemon runs the transcript through a cloud
+    # LLM for cleanup + vocabulary correction before pasting. NOTE: this sends
+    # the transcript OFF the machine (on-device Gemma is deferred — it OOMs here).
+    # Always falls back to the raw transcript on any API failure/timeout.
+    rewrite: bool = False
+    # Domain terms / proper nouns fed into the rewrite prompt so mis-hearings are
+    # corrected toward the intended spelling (e.g. ["git", "CellStrat"]).
+    vocabulary: list[str] = field(default_factory=list)
+    # Opt-in screen-context vision (not captured/sent unless explicitly enabled).
+    screen_context: bool = False
+    # OpenAI model + reasoning effort. nano @ effort "none" is the fast default
+    # (simple cleanup, no reasoning); bump to gpt-5.4-mini / effort "low" for
+    # more accuracy at the cost of latency.
+    rewriter_model: str = "gpt-5.4-nano"
+    rewrite_effort: str = "none"
+    # API key: prefer this, else $OPENAI_API_KEY. Leave empty to use the env var.
+    openai_api_key: str = ""
+    # Hard deadline on the rewrite round-trip; on expiry the raw transcript is
+    # injected instead (a dictation never blocks on the LLM).
+    rewrite_timeout: float = 10.0
 
     def __post_init__(self) -> None:
         self.device = _normalize_device(self.device)
         self.model_path = _expand_path(self.model_path)
         self.cache_dir = _expand_path(self.cache_dir)
+        self.vocabulary = [str(term) for term in self.vocabulary]
 
 
 def load(path: str | os.PathLike | None = None) -> Config:

@@ -2,7 +2,7 @@
 
 ## Shipped — v1 (MVP-0 + MVP-1)
 
-- Warm daemon, `Super+\` toggle, record → transcribe → paste on Wayland (ADR-0001/0002).
+- Warm daemon, `Super+W` toggle, record → transcribe → paste on Wayland (ADR-0001/0002).
 - Whisper on the **Intel NPU** (whisper-small, ~0.3 s/utterance) with sticky NPU→CPU fallback.
 - GNOME status-bar indicator (separate process, StatusNotifierItem).
 - Silence gate, mic pinning, PortAudio self-heal.
@@ -11,62 +11,66 @@ Everything in `.cursor/plans/whispr-local-v1_*.plan.md` is complete. Items below
 
 ---
 
-## Next (headline): "Dictation copilot" — on-device transcript rewrite with Gemma 4 E2B
+## "Dictation copilot" — transcript rewrite stage (cloud-first, shipped; local deferred)
 
 **Problem.** Raw Whisper output is literal: no cleanup, wrong domain terms (hears "gate" for
 "git", "nerd bite" for a product name), and blind to what's on screen — so a sentence dictated
 into a code comment reads the same as one dictated into a chat box.
 
-**Solution.** A post-transcription **rewrite stage**: pass the raw transcript through a small
-**on-device multimodal VLM — `google/gemma-4-E2B-it`** (the efficient E-variant; `E4B-it` as a
-quality-up option). It's supported by OpenVINO GenAI's **`VLMPipeline`** (`gemma4` architecture in
-the VLM table), so it does three jobs in one pass, all locally (no cloud):
+**Solution.** A post-transcription **rewrite stage** between `Transcriber` and `Injector`
+(`transcript → rewrite → inject`), behind an injected `complete()` seam so the pure
+prompt-assembly logic (`build_instructions` / `clean_reply`) is unit-testable and the LLM call is a
+thin adapter. Three jobs:
 
 1. **Cleanup.** Fix punctuation, casing, and remove disfluencies ("um", "you know", false starts)
-   without changing meaning. Off by default per-context if it ever over-edits.
-2. **Custom vocabulary.** A user-configured list of domain terms / proper nouns / jargon
-   (e.g. `git`, `OpenVINO`, `nerdimite`, `ydotool`) fed into the prompt so the model corrects
-   mis-hearings toward the intended words. Config in `~/.config/whispr/config.toml`
-   (e.g. `vocabulary = ["git", "OpenVINO", ...]`), possibly with phonetic hints.
-3. **Screen context (vision).** Capture the focused window (or a region) and feed it to Gemma 3n's
-   vision path so the rewrite matches the surrounding text — tone, terminology, whether it's code
-   vs prose vs a chat reply. E.g. dictating into a terminal yields a command; into a doc yields a
-   sentence.
+   without changing meaning. ✅ shipped.
+2. **Custom vocabulary.** A user-configured `vocabulary = [...]` of domain terms / proper nouns fed
+   into the prompt so the model corrects mis-hearings toward the intended words. ✅ shipped.
+3. **Screen context (vision).** Capture the focused window and feed it to the model's vision path so
+   the rewrite matches the surrounding text (code vs prose vs chat). ⏳ flag exists
+   (`screen_context`), capture not yet wired.
 
-**Where it fits.** New stage between `Transcriber` and `Injector` in the daemon
-(`transcript → rewrite(context) → inject`), behind an injected seam like the others so the pure
-prompt-assembly logic is unit-testable and the `VLMPipeline` call is a thin adapter. Reuses the
-warm-daemon pattern: keep Gemma resident alongside Whisper.
+### Shipped now: cloud backend (OpenAI Responses API)
 
-**Device split (nice property).** The VLMPipeline runs on **CPU or GPU — NPU is not supported for
-VLMs** in genai. On Lunar Lake that's a clean division of labour: **Whisper stays on the NPU, Gemma
-runs on the iGPU (Arc)**, so the two models don't contend for one accelerator.
+`src/whispr/rewriter.py` runs the transcript through **`gpt-5.4-nano`** (reasoning `effort: "none"`,
+low verbosity — OpenAI's recommended latency-critical path; `gpt-5.4-mini` / `"low"` as a
+quality-up). Off by default (`rewrite = false`); always falls back to the raw transcript on any API
+failure/timeout, mirroring the Transcriber's validation discipline. Key via
+`~/.config/whispr/whispr.env` (`OPENAI_API_KEY=…`, loaded by the systemd unit) or `openai_api_key`.
 
-**Open questions / spikes before committing:**
-- **iGPU latency + version matrix** — confirm `gemma-4-E2B-it` exports and runs on the Lunar Lake
-  iGPU via `VLMPipeline`, at what latency, and under which openvino-genai/optimum-intel/transformers
-  pins (same version-matrix risk we hit with Whisper — see memory `npu-whisper-working`; note the
-  runtime is pinned to the 2025.3 line for the NPU-Whisper path, so check Gemma-4 VLM support exists
-  there or whether the two need different genai builds / processes). Budget: whole rewrite sub-second.
-- **Vision on Wayland** — how to grab the focused-window pixels (portal screenshot API / grim +
-  the active window geometry) without a disruptive permission prompt each time; privacy implications
-  of screenshotting (never leaves the machine; make the vision step explicitly opt-in).
-- **Latency vs quality** — E2B vs E4B; token budget; whether cleanup+vocab (text-only) should be a
-  fast default and screen-context a heavier opt-in mode.
-- **Prompt-injection safety** — screen text is untrusted input to the rewrite prompt; the model must
-  treat it as context to imitate, not instructions to follow.
-- **Failure mode** — if rewrite fails or times out, fall back to injecting the raw Whisper transcript
-  (never block a dictation on the LLM). Mirror the Transcriber's validation/fallback discipline.
+**Tradeoff (why this isn't the endgame):** cloud means the transcript **leaves the machine**, which
+cuts against the project's on-device ethos. Acceptable as an opt-in MVP; the local backend below is
+the target.
 
-**Suggested path:** `grill-me` the open questions → spike `gemma-4-E2B-it` on the iGPU via
-`VLMPipeline` → `to-design` → `to-plan` → TDD build (text-only cleanup+vocab first as a tracer
-bullet, screen-context as a second slice).
+### Deferred: on-device Gemma 4 E2B (blocked on memory)
+
+The intended endgame is **`google/gemma-4-E2B-it`** via OpenVINO GenAI's **`VLMPipeline`** (`gemma4`
+arch) on the **iGPU (Arc)** — Whisper stays on the NPU, so no accelerator contention (VLMs aren't
+NPU-supported anyway). This keeps everything local and unlocks the vision path.
+
+**Blocker:** the int4 **export OOMs / hard-crashes this box** (30 GB RAM). The export loads the full
+fp32 model + torch tracing into RAM and freezes the system. Export recipe that got furthest (all
+three fixes needed, see memory `gemma4-export-recipe`): `optimum-intel@main` (released 2.0.0 predates
+gemma4) + `transformers==5.5.0` (over optimum's stale `<5.1` cap) + `--task image-text-to-text` (E2B
+auto-detects `any-to-any` via its audio tower, which the exporter rejects) + `TMPDIR` on real disk
+(OpenVINO stages the fp16 IR through tmpfs `/tmp` and dies with `basic_ios::clear: iostream error`).
+Still OOMs at the model-load/trace step regardless.
+
+**Open questions before retrying local:**
+- **Memory** — export on a bigger box / swap / a pre-exported IR from HF; and confirm *inference*
+  memory on the iGPU fits (separate from export).
+- **iGPU latency + version matrix** — gemma4 VLM support lands in openvino-genai **2026.2** (`gemma4`
+  dir), separate from the 2025.3-pinned NPU-Whisper runtime, so it needs its own venv/process.
+- **Vision on Wayland** — grab focused-window pixels (portal screenshot / grim) without a prompt each
+  time; keep the vision step opt-in (privacy).
+- **Prompt-injection safety** — screen text is untrusted; `build_instructions` already frames it as
+  context to imitate, never instructions to follow.
 
 ---
 
 ## Backlog (smaller, independent)
 
-- **Push-to-talk mode** — hold `Super+\` to record, release to transcribe+paste (vs toggle).
+- **Push-to-talk mode** — hold `Super+W` to record, release to transcribe+paste (vs toggle).
 - **Tray error state** — distinct indicator glyph when a transcription/paste fails (today: idle /
   recording / transcribing / down only).
 - **Injection settle-delay tuning** (design open-Q #3) — verify paste reliability across apps; make

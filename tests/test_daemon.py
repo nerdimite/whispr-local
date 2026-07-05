@@ -204,6 +204,35 @@ def test_device_reported_from_transcriber():
     assert daemon.handle({"cmd": "status"})["device"] == "NPU"
 
 
+# -- Rewrite stage (transcript → rewrite → inject, dictation-copilot) --------
+
+def test_rewriter_output_is_injected():
+    class FakeRewriter:
+        def rewrite(self, transcript):
+            return transcript.capitalize() + "."
+
+    inj = FakeInjector()
+    daemon = make_daemon(transcriber=FakeTranscriber(text="hello world"), injector=inj)
+    daemon.rewriter = FakeRewriter()
+
+    daemon.handle({"cmd": "toggle"})
+    daemon.handle({"cmd": "toggle"})
+    daemon._worker_thread.join(timeout=5)
+
+    assert inj.injected == ["Hello world."]
+
+
+def test_no_rewriter_injects_raw_transcript():
+    inj = FakeInjector()
+    daemon = make_daemon(transcriber=FakeTranscriber(text="raw"), injector=inj)
+
+    daemon.handle({"cmd": "toggle"})
+    daemon.handle({"cmd": "toggle"})
+    daemon._worker_thread.join(timeout=5)
+
+    assert inj.injected == ["raw"]
+
+
 # -- Integration: the client → socket → Daemon.handle path (tracer bullet) --
 
 def test_toggle_round_trips_through_socket(tmp_path):

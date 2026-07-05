@@ -7,6 +7,10 @@ requires-python = "==3.12.*"
 dependencies = [
     "numpy",
     "sounddevice",
+    # Dictation-copilot rewrite stage (opt-in via config.rewrite). Cloud OpenAI
+    # for now — local on-device Gemma is deferred (OOMs on export/inference on
+    # 30 GB RAM; see docs/ROADMAP.md). Lightweight pure-python HTTP client.
+    "openai>=2.0",
 ]
 
 [project.scripts]

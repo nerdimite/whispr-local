@@ -22,3 +22,27 @@ dump_last_recording = false
 # (e.g. "Digital Microphone"). Pin this if a bluetooth headset keeps stealing the
 # default input and feeding whispr silence. See `whispr`'s logged device list.
 # input_device = "pipewire"
+
+# --- Dictation copilot (rewrite stage, docs/ROADMAP.md) ----------------------
+# Post-transcription cleanup + vocabulary correction by a cloud LLM (OpenAI).
+# NOTE: this sends the transcript OFF the machine — on-device Gemma is the goal
+# but is deferred (OOMs on this box). The daemon falls back to the raw transcript
+# whenever the API is down or slow, so this can never lose a dictation.
+# Provide a key: put OPENAI_API_KEY in ~/.config/whispr/whispr.env (chmod 600),
+# or set openai_api_key below.
+rewrite = false
+
+# Domain terms / proper nouns the rewrite corrects mis-hearings toward. For a
+# name pronounced unlike its spelling, add a spoken-form hint so Whisper's version
+# maps back to it: "Canonical (pronounced <what you hear>)".
+# vocabulary = ["git", "OpenVINO", "CellStrat", "Sasi (pronounced Shashi)"]
+
+# Opt-in screen-context vision (NOT captured/sent unless enabled; off by default).
+screen_context = false
+
+# gpt-5.4-nano @ effort "none" is the fast default; gpt-5.4-mini / "low" is more
+# accurate but slower.
+# rewriter_model = "gpt-5.4-nano"
+# rewrite_effort = "none"
+# openai_api_key = "sk-..."   # prefer ~/.config/whispr/whispr.env instead
+# rewrite_timeout = 10.0      # seconds; past this the raw transcript is pasted

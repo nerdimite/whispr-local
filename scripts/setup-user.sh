@@ -2,7 +2,7 @@
 # whispr-local setup — PHASE 2 (per-user, no sudo). Run this AFTER re-login.
 #
 # Enables the user services (which need the input/render groups now active), binds
-# the Super+\ hotkey, and verifies the NPU is visible to OpenVINO. Safe to re-run.
+# the Super+W hotkey, and verifies the NPU is visible to OpenVINO. Safe to re-run.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -84,8 +84,31 @@ else
   fi
 fi
 
-# --- 3. Bind Super+\ → whispr toggle --------------------------------------
-say "Binding Super+\\ to 'whispr toggle' via gsettings"
+# --- 2c. dictation-copilot rewrite stage (cloud OpenAI, opt-in) ------------
+# No extra service: the rewrite runs inline in the daemon via the OpenAI API.
+# The daemon reads OPENAI_API_KEY from $CONFIG_HOME/whispr/whispr.env (a stable
+# XDG path — the service must not depend on the repo's location). Seed that file
+# from the repo .env if present, so a key in the dev tree "just works".
+ENV_FILE="$CONFIG_HOME/whispr/whispr.env"
+if [[ -f "$REPO_DIR/.env" ]] && grep -q '^OPENAI_API_KEY=' "$REPO_DIR/.env"; then
+  if [[ ! -s "$ENV_FILE" ]] || ! grep -q '^OPENAI_API_KEY=' "$ENV_FILE"; then
+    mkdir -p "$(dirname "$ENV_FILE")"
+    grep '^OPENAI_API_KEY=' "$REPO_DIR/.env" > "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    say "Seeded $ENV_FILE with OPENAI_API_KEY from the repo .env"
+  fi
+fi
+if grep -qs '^rewrite *= *true' "$CONFIG_HOME/whispr/config.toml" 2>/dev/null; then
+  if [[ ! -s "$ENV_FILE" ]] && [[ -z "${OPENAI_API_KEY:-}" ]] \
+     && ! grep -qs '^openai_api_key *= *"..*"' "$CONFIG_HOME/whispr/config.toml"; then
+    warn "rewrite=true but no OpenAI API key found. Add one so the daemon can reach it:"
+    warn "  printf 'OPENAI_API_KEY=sk-...\\n' > $ENV_FILE && chmod 600 $ENV_FILE"
+    warn "Until then it pastes the raw transcript."
+  fi
+fi
+
+# --- 3. Bind Super+W → whispr toggle --------------------------------------
+say "Binding Super+W to 'whispr toggle' via gsettings"
 KEYPATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/whispr/"
 BASE="org.gnome.settings-daemon.plugins.media-keys"
 LIST="$(gsettings get "$BASE" custom-keybindings)"
@@ -102,8 +125,8 @@ CBASE="$BASE.custom-keybinding:$KEYPATH"
 WHISPR_BIN="$REPO_DIR/.venv/bin/whispr"
 gsettings set "$CBASE" name 'whispr toggle'
 gsettings set "$CBASE" command "$WHISPR_BIN toggle"
-gsettings set "$CBASE" binding '<Super>backslash'
-echo "Bound <Super>backslash → whispr toggle."
+gsettings set "$CBASE" binding '<Super>w'
+echo "Bound <Super>w → whispr toggle."
 
 # --- 4. Verify NPU visibility + Daemon health -----------------------------
 say "Verifying NPU visibility to OpenVINO"
@@ -122,7 +145,7 @@ uv run --project "$REPO_DIR" whispr status || warn "Daemon not answering yet; ch
 
 # --- Done ------------------------------------------------------------------
 say "Setup complete"
-echo "  • Super+\\           → start/stop a Dictation"
+echo "  • Super+W           → start/stop a Dictation"
 echo "  • Tray icon         → live state + Start/stop/Cancel menu (top bar)"
 echo "  • whispr status     → State + active device (NPU/CPU)"
 echo "  • journalctl --user -u whispr -f   → Daemon logs (device won, load time)"

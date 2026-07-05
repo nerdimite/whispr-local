@@ -15,6 +15,11 @@ ExecStart=@UV@ run --project @REPO@ whispr daemon
 # The injector shells out to `ydotool key ctrl+v`; point it at ydotoold's socket
 # so paste works regardless of the client's compiled-in default (%t = /run/user/<uid>).
 Environment=YDOTOOL_SOCKET=%t/.ydotool_socket
+# Optional: the dictation-copilot rewrite stage reads OPENAI_API_KEY from here
+# (systemd --user does not inherit the login shell's env). Leading `-` = the file
+# is optional, so the daemon still starts when rewrite is disabled. setup-user.sh
+# seeds this from the repo .env; this XDG path is stable across repo moves.
+EnvironmentFile=-%h/.config/whispr/whispr.env
 Restart=on-failure
 RestartSec=2
 # The NPU model load can take ~5-15s on first compile; don't count that as a hang.

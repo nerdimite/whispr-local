@@ -52,6 +52,7 @@ class Daemon:
         recorder,
         transcriber,
         injector,
+        rewriter=None,
         notify: Optional[Callable[[str], None]] = None,
         dump_recording_to: Optional[Path] = None,
         silence_threshold: float = 0.02,
@@ -62,6 +63,10 @@ class Daemon:
         self.recorder = recorder
         self.transcriber = transcriber
         self.injector = injector
+        # Optional dictation-copilot rewrite stage (transcript → rewrite → inject).
+        # The Rewriter client itself falls back to the raw transcript on any
+        # failure, so this seam can never lose a dictation.
+        self.rewriter = rewriter
         self._notify = notify
         self._dump_recording_to = dump_recording_to
         # Below this peak amplitude the capture is effectively silence; skip it so
@@ -162,6 +167,11 @@ class Daemon:
             self._post(self._finish)
 
     def _deliver(self, transcript: str) -> None:
+        if transcript and self.rewriter is not None:
+            rewritten = self.rewriter.rewrite(transcript)
+            if rewritten != transcript:
+                print(f"whispr: rewritten={rewritten!r}", flush=True)
+            transcript = rewritten
         if transcript:
             print(f"whispr: injecting {len(transcript)} chars", flush=True)
             self.injector.inject(transcript)
@@ -196,8 +206,17 @@ def _build_from_config(config):
     )
     transcriber = Transcriber(config, notify=notifier)
     injector = Injector()
+    rewriter = None
+    if config.rewrite:
+        from .rewriter import Rewriter, make_openai_completer
+
+        rewriter = Rewriter(
+            complete=make_openai_completer(config),
+            vocabulary=config.vocabulary,
+            log=lambda msg: print(f"whispr: {msg}", flush=True),
+        )
     dump_to = (config.cache_dir / "last_recording.wav") if config.dump_last_recording else None
-    return recorder, transcriber, injector, notifier, dump_to
+    return recorder, transcriber, injector, rewriter, notifier, dump_to
 
 
 def run_daemon() -> int:
@@ -214,7 +233,7 @@ def run_daemon() -> int:
     config = load()
     print(f"whispr: loading Whisper on device={config.device} …", flush=True)
     t0 = time.monotonic()
-    recorder, transcriber, injector, notifier, dump_to = _build_from_config(config)
+    recorder, transcriber, injector, rewriter, notifier, dump_to = _build_from_config(config)
     print(
         f"whispr: model warm on device={transcriber.active_device} "
         f"in {time.monotonic() - t0:.1f}s",
@@ -225,6 +244,7 @@ def run_daemon() -> int:
         recorder,
         transcriber,
         injector,
+        rewriter=rewriter,
         notify=notifier,
         dump_recording_to=dump_to,
         silence_threshold=config.silence_threshold,

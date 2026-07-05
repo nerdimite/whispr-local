@@ -1,6 +1,6 @@
 # whispr-local
 
-On-device Whisper dictation for Ubuntu GNOME/Wayland. Press **`Super+\`**, speak, press again
+On-device Whisper dictation for Ubuntu GNOME/Wayland. Press **`Super+W`**, speak, press again
 — the transcript is pasted into the focused window. Runs locally (no cloud) on the Intel
 Lunar Lake **NPU** (~0.1 s per short utterance, ~4× faster than CPU), falling back to CPU
 automatically if the NPU is unavailable.
@@ -11,10 +11,10 @@ automatically if the NPU is unavailable.
 
 ## TL;DR — daily use
 
-The daemon autostarts at login. After a **reboot, just log in and press `Super+\`.** Nothing to start.
+The daemon autostarts at login. After a **reboot, just log in and press `Super+W`.** Nothing to start.
 
 ```bash
-Super+\          # start recording · press again to stop → transcribe → paste
+Super+W                   # start recording · press again to stop → transcribe → paste
 ```
 
 Check it's alive:
@@ -49,7 +49,7 @@ the Python env (`uv sync --extra npu`), and offers to export the Whisper model.
 bash scripts/setup-user.sh
 ```
 
-Enables the `ydotoold` + `whispr` services, binds `Super+\`, and verifies the mic + device.
+Enables the `ydotoold` + `whispr` services, binds `Super+W`, and verifies the mic + device.
 
 Then do the first dictation into any text field.
 
@@ -59,7 +59,7 @@ Then do the first dictation into any text field.
 
 | Command | What it does |
 |---|---|
-| `Super+\` | Toggle a dictation (record ⇄ stop+transcribe+paste) |
+| `Super+W` | Toggle a dictation (record ⇄ stop+transcribe+paste) |
 | `whispr status` | Show state + active device (NPU/CPU) |
 | `whispr toggle` | Same as the hotkey (start/stop) |
 | `whispr cancel` | Drop an in-progress recording without transcribing |
