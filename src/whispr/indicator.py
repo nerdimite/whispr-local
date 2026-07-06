@@ -32,6 +32,8 @@ ICON_TRANSCRIBING = "content-loading-symbolic"
 ICON_DOWN = "microphone-sensitivity-muted-symbolic"
 
 POLL_INTERVAL_MS = 250
+# Refresh the microphone list every this-many status ticks (~2s at 250ms).
+MIC_REFRESH_EVERY = 8
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,53 @@ def view_for(status: dict | None) -> IndicatorView:
     )
 
 
+@dataclass(frozen=True)
+class MicOption:
+    """One entry in the microphone submenu. Pure data — the harness maps it onto a
+    radio menu item. `device` is what to send back as `set_device`'s device: None
+    for the system default, else a device identifier (a PipeWire source name or an
+    int index) the daemon's recorder understands."""
+
+    label: str
+    device: object
+    active: bool
+
+
+def _is_current(current, device) -> bool:
+    """Is `device` the one the daemon reports as current?
+
+    Exact match, plus a substring tolerance so a config-pinned name fragment (e.g.
+    "HiFi__Mic__source") still lights up the full source name it selects."""
+    if current is None or device is None:
+        return current is None and device is None
+    if current == device:
+        return True
+    return isinstance(current, str) and isinstance(device, str) and current in device
+
+
+def device_menu(reply: dict | None) -> list[MicOption]:
+    """Map a `list_devices` reply to the microphone submenu options.
+
+    Always leads with a "System default" entry (device=None), then one entry per
+    input device. The option matching the daemon's reported `current` is marked
+    active. Returns [] when the daemon is unreachable or errored, so the harness can
+    show a disabled placeholder instead of a misleading empty list.
+    """
+    if not reply or reply.get("status") != "ok":
+        return []
+    current = reply.get("current")
+    matched = False
+    options = [MicOption(label="System default", device=None, active=current is None)]
+    for entry in reply.get("devices", []):
+        device = entry.get("device")
+        name = entry.get("name", str(device))
+        suffix = " (default)" if entry.get("is_default") else ""
+        active = not matched and _is_current(current, device)
+        matched = matched or active
+        options.append(MicOption(label=f"{name}{suffix}", device=device, active=active))
+    return options
+
+
 def poll_status(send=ipc.send, sock_path=ipc.DEFAULT_SOCK_PATH) -> dict | None:
     """Ask the Daemon for its status; return None if it isn't reachable.
 
@@ -84,6 +133,14 @@ def poll_status(send=ipc.send, sock_path=ipc.DEFAULT_SOCK_PATH) -> dict | None:
     """
     try:
         return send({"cmd": "status"}, sock_path)
+    except (ipc.DaemonUnavailable, OSError):
+        return None
+
+
+def poll_devices(send=ipc.send, sock_path=ipc.DEFAULT_SOCK_PATH) -> dict | None:
+    """Ask the Daemon for its capture-device list; None if it isn't reachable."""
+    try:
+        return send({"cmd": "list_devices"}, sock_path)
     except (ipc.DaemonUnavailable, OSError):
         return None
 
@@ -128,6 +185,9 @@ def run_indicator(sock_path=ipc.DEFAULT_SOCK_PATH) -> int:
     header.set_sensitive(False)
     toggle_item = Gtk.MenuItem(label="Start / stop dictation")
     cancel_item = Gtk.MenuItem(label="Cancel recording")
+    mic_item = Gtk.MenuItem(label="Microphone")
+    mic_menu = Gtk.Menu()
+    mic_item.set_submenu(mic_menu)
     quit_item = Gtk.MenuItem(label="Quit indicator")
 
     toggle_item.connect("activate", lambda _w: _send({"cmd": "toggle"}, sock_path))
@@ -135,10 +195,49 @@ def run_indicator(sock_path=ipc.DEFAULT_SOCK_PATH) -> int:
     quit_item.connect("activate", lambda _w: Gtk.main_quit())
 
     for item in (header, Gtk.SeparatorMenuItem(), toggle_item, cancel_item,
-                 Gtk.SeparatorMenuItem(), quit_item):
+                 mic_item, Gtk.SeparatorMenuItem(), quit_item):
         menu.append(item)
     menu.show_all()
     indicator.set_menu(menu)
+
+    # `sig` short-circuits rebuilds when the device set/selection is unchanged (the
+    # common case) so we don't churn radio widgets under an open menu. `building`
+    # suppresses the `toggled` handler while we programmatically set_active.
+    mic_state = {"sig": None, "building": False, "ticks": 0}
+
+    def on_mic_toggled(widget, device) -> None:
+        if mic_state["building"] or not widget.get_active():
+            return
+        _send({"cmd": "set_device", "device": device}, sock_path)
+
+    def refresh_mic_menu() -> None:
+        options = device_menu(poll_devices(sock_path=sock_path))
+        sig = tuple((o.label, o.active) for o in options)
+        if sig == mic_state["sig"]:
+            return
+        mic_state["sig"] = sig
+        mic_state["building"] = True
+        try:
+            for child in mic_menu.get_children():
+                mic_menu.remove(child)
+            if not options:
+                placeholder = Gtk.MenuItem(label="daemon not running")
+                placeholder.set_sensitive(False)
+                mic_menu.append(placeholder)
+            else:
+                group = None
+                for opt in options:
+                    radio = Gtk.RadioMenuItem.new_with_label([], opt.label)
+                    if group is None:
+                        group = radio
+                    else:
+                        radio.join_group(group)
+                    radio.set_active(opt.active)
+                    radio.connect("toggled", on_mic_toggled, opt.device)
+                    mic_menu.append(radio)
+            mic_menu.show_all()
+        finally:
+            mic_state["building"] = False
 
     def tick() -> bool:
         view = view_for(poll_status(sock_path=sock_path))
@@ -146,6 +245,13 @@ def run_indicator(sock_path=ipc.DEFAULT_SOCK_PATH) -> int:
         header.set_label(f"whispr — {view.label}")
         # Cancel only makes sense mid-recording.
         cancel_item.set_sensitive(view.active)
+        # Switching mics is only allowed at IDLE (the daemon rejects it otherwise).
+        mic_item.set_sensitive(not view.active)
+        # Device set changes rarely; enumerating it (sd.query_devices in the daemon)
+        # every 250ms poll is wasteful, so refresh the mic list only every ~2s.
+        if mic_state["ticks"] % MIC_REFRESH_EVERY == 0:
+            refresh_mic_menu()
+        mic_state["ticks"] += 1
         return True  # keep the timer alive
 
     tick()

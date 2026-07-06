@@ -63,12 +63,22 @@ Then do the first dictation into any text field.
 | `whispr status` | Show state + active device (NPU/CPU) |
 | `whispr toggle` | Same as the hotkey (start/stop) |
 | `whispr cancel` | Drop an in-progress recording without transcribing |
+| `whispr devices` | List capture devices (marks the one in use) |
+| `whispr set-device <index\|default>` | Switch the capture mic live (until restart) |
 | `journalctl --user -u whispr -f` | Watch the daemon live (device, rms, transcript, paste) |
 | `systemctl --user restart whispr` | Restart the daemon (after a config change) |
 
 **Status-bar icon:** a microphone icon sits in the GNOME top bar (idle → recording → transcribing).
-Click it for a menu: **Start/stop dictation**, **Cancel recording**, **Quit**. It's a separate process
+Click it for a menu: **Start/stop dictation**, **Cancel recording**, a **Microphone** submenu to switch
+the capture device on the fly, and **Quit**. The mic switch takes effect on the next dictation and lasts
+until the daemon restarts (`input_device` in config is the persistent default). It's a separate process
 (`whispr-indicator.service`) that polls the daemon, so it never blocks dictation.
+
+**Bluetooth headsets:** a BT headset only exposes its mic in the HFP/HSP "headset" profile (the hi-fi
+A2DP playback profile has no mic). When you dictate from a `bluez_*` mic, whispr auto-switches the
+headset into that profile for the recording and restores it afterwards — no need to touch system sound
+settings. There's a ~1s profile-switch delay at the start of the first such recording, so wait for the
+recording indicator before you speak. Disable with `bluetooth_autoswitch = false`.
 
 **Clipboard note:** the transcript stays on the clipboard after pasting, so if the wrong window
 was focused you can just `Ctrl+V` again where you meant to.
@@ -85,6 +95,8 @@ Edit `~/.config/whispr/config.toml` (all fields optional — see `config.example
 | `device` | `"NPU"` | `"NPU"` (auto-falls-back to CPU) or `"CPU"` |
 | `input_device` | system default | Mic to record from — an index or a name substring. **Pin this** if bluetooth keeps stealing the mic. |
 | `silence_threshold` | `0.02` | Skip transcription below this RMS (stops Whisper hallucinating on silence). Tune from the logged `rms=`. |
+| `bluetooth_autoswitch` | `true` | Flip a BT headset into its HFP/HSP mic profile for the recording, then restore it. |
+| `normalize_audio` | `true` | Peak-normalize a real capture (after the silence gate) so quiet mics (esp. BT/HFP) are lifted to a level Whisper hears. |
 | `notify` | `true` | Desktop notifications |
 | `dump_last_recording` | `false` | Write the last capture to `<cache_dir>/last_recording.wav` for debugging |
 

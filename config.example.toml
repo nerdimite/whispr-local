@@ -20,8 +20,30 @@ dump_last_recording = false
 
 # Capture device: omit/null = system default, an integer index, or a name substring
 # (e.g. "Digital Microphone"). Pin this if a bluetooth headset keeps stealing the
-# default input and feeding whispr silence. See `whispr`'s logged device list.
+# default input and feeding whispr silence. See `whispr devices` for the list.
+# This is the STARTUP device — switch it live from the tray's "Microphone" submenu
+# or with `whispr set-device <index>` (see `whispr devices`); those don't persist.
 # input_device = "pipewire"
+
+# Bluetooth headsets can't do hi-fi playback (A2DP) and mic capture at once — the
+# mic only exists in the HFP/HSP "headset" profile. With this on (default), whispr
+# flips a BT headset into that profile just for the recording and restores it after,
+# so you can dictate into a headset without touching system sound settings. Needs
+# PipeWire's `wpctl`/`pw-dump`. Set false to manage the profile yourself.
+# bluetooth_autoswitch = true
+
+# Silence gate: a capture is dropped as "no speech" only if BOTH its rms is below
+# silence_threshold AND its loudest sample is below peak_threshold. The peak clause
+# rescues quiet mics — a Bluetooth headset in HFP mode captures speech as brief loud
+# peaks over a low average, so an rms-only gate wrongly drops it. Watch the daemon's
+# logged `rms=`/`peak=` for a real utterance vs. ambient and tune from there.
+# silence_threshold = 0.02
+# peak_threshold = 0.05
+
+# Peak-normalize a real capture (after the gate) so quiet mics are lifted to a level
+# Whisper hears clearly instead of you having to speak right into the mic. Boost-only,
+# capped, preserves signal-to-noise. Set false to feed Whisper the raw capture.
+# normalize_audio = true
 
 # --- Dictation copilot (rewrite stage, docs/ROADMAP.md) ----------------------
 # Post-transcription cleanup + vocabulary correction by a cloud LLM (OpenAI).

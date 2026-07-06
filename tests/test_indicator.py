@@ -64,3 +64,62 @@ def test_poll_status_maps_oserror_to_none():
         raise OSError("boom")
 
     assert indicator.poll_status(send=fake_send, sock_path="/tmp/x.sock") is None
+
+
+# -- microphone submenu mapping ---------------------------------------------
+
+def _devices_reply(current):
+    return {
+        "status": "ok",
+        "current": current,
+        "devices": [
+            {"device": "alsa_input.builtin", "name": "Digital Microphone", "is_default": True},
+            {"device": "bluez_input.jbl", "name": "JBL Tune 770NC", "is_default": False},
+        ],
+    }
+
+
+def test_device_menu_leads_with_system_default():
+    options = indicator.device_menu(_devices_reply(current="bluez_input.jbl"))
+    assert options[0].label == "System default"
+    assert options[0].device is None
+    assert options[0].active is False  # a specific device is selected
+
+
+def test_device_menu_marks_current_device_active():
+    options = indicator.device_menu(_devices_reply(current="bluez_input.jbl"))
+    labels = [o.label for o in options]
+    assert labels == ["System default", "Digital Microphone (default)", "JBL Tune 770NC"]
+    active = [o.label for o in options if o.active]
+    assert active == ["JBL Tune 770NC"]
+    # The device value carried back for set_device is the source name.
+    assert options[2].device == "bluez_input.jbl"
+
+
+def test_device_menu_default_selection_activates_system_default():
+    options = indicator.device_menu(_devices_reply(current=None))
+    assert options[0].active is True
+    assert not any(o.active for o in options[1:])
+
+
+def test_device_menu_matches_config_pinned_substring():
+    # config.input_device can be a name fragment; it should still light up the full
+    # source name it resolves to (and only that one).
+    options = indicator.device_menu(_devices_reply(current="builtin"))
+    active = [o.label for o in options if o.active]
+    assert active == ["Digital Microphone (default)"]
+
+
+def test_device_menu_empty_when_daemon_unreachable():
+    assert indicator.device_menu(None) == []
+
+
+def test_device_menu_empty_on_error_reply():
+    assert indicator.device_menu({"status": "error", "error": "boom"}) == []
+
+
+def test_poll_devices_maps_unavailable_to_none():
+    def fake_send(command, sock_path):
+        raise ipc.DaemonUnavailable("/tmp/x.sock")
+
+    assert indicator.poll_devices(send=fake_send, sock_path="/tmp/x.sock") is None

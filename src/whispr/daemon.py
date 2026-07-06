@@ -25,6 +25,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from . import ipc
+from .recorder import normalize_peak
 from .state import Effect, Event, State, transition
 
 
@@ -56,6 +57,9 @@ class Daemon:
         notify: Optional[Callable[[str], None]] = None,
         dump_recording_to: Optional[Path] = None,
         silence_threshold: float = 0.02,
+        peak_threshold: float = 0.05,
+        normalize_audio: bool = True,
+        list_devices: Optional[Callable[[], list]] = None,
         spawn: Optional[Callable[[Callable[[], None]], None]] = None,
         post: Optional[Callable[[Callable[[], None]], None]] = None,
     ):
@@ -63,6 +67,10 @@ class Daemon:
         self.recorder = recorder
         self.transcriber = transcriber
         self.injector = injector
+        # Enumerates capture devices for the `list_devices` command (runs in the
+        # daemon's venv, where sounddevice lives — the indicator can't). None ⇒ the
+        # feature degrades to "system default only" rather than erroring.
+        self._list_devices = list_devices
         # Optional dictation-copilot rewrite stage (transcript → rewrite → inject).
         # The Rewriter client itself falls back to the raw transcript on any
         # failure, so this seam can never lose a dictation.
@@ -72,6 +80,11 @@ class Daemon:
         # Below this peak amplitude the capture is effectively silence; skip it so
         # Whisper doesn't hallucinate a phantom word ("you", "Thank you.") from noise.
         self._silence_threshold = silence_threshold
+        # A capture also counts as speech if its peak clears this, even when its rms
+        # is below silence_threshold — quiet mics (BT/HFP) speak in transient peaks.
+        self._peak_threshold = peak_threshold
+        # Peak-normalize a real capture before transcription (helps quiet BT mics).
+        self._normalize = normalize_audio
         self._spawn = spawn or self._default_spawn
         # Default `post` runs the callback inline (worker thread); a `_lock` keeps
         # State mutation safe when the worker's completion races an incoming command.
@@ -91,6 +104,37 @@ class Daemon:
         if callable(self._notify):
             self._notify(message)
 
+    def _input_device(self):
+        return getattr(self.recorder, "device", None)
+
+    # -- microphone selection ----------------------------------------------
+    def _list_input_devices(self) -> dict:
+        """Enumerate capture devices and report which one the recorder will use."""
+        devices = []
+        if self._list_devices is not None:
+            try:
+                devices = list(self._list_devices())
+            except Exception as exc:  # enumeration must never crash the daemon
+                traceback.print_exc()
+                return {"status": "error", "error": str(exc), "current": self._input_device()}
+        with self._lock:
+            current = self._input_device()
+        return {"status": "ok", "devices": devices, "current": current}
+
+    def _set_input_device(self, device) -> dict:
+        """Switch the capture device. Refused unless IDLE — swapping mid-recording
+        would strand a half-captured buffer on the old device. Caller holds `_lock`."""
+        if self.state is not State.IDLE:
+            self._emit("busy — can't switch microphone now")
+            return {"status": "busy", "state": self.state.name, "current": self._input_device()}
+        try:
+            self.recorder.set_device(device)
+        except Exception as exc:
+            traceback.print_exc()
+            return {"status": "error", "error": str(exc), "current": self._input_device()}
+        print(f"whispr: capture device set to {device!r}", flush=True)
+        return {"status": "ok", "state": self.state.name, "current": self._input_device()}
+
     # -- command handling --------------------------------------------------
     def handle(self, command: dict) -> dict:
         """Socket entry point: map a command to a State transition + reply."""
@@ -98,6 +142,11 @@ class Daemon:
         if cmd == "status":
             with self._lock:
                 return {"status": "ok", "state": self.state.name, "device": self._device()}
+        if cmd == "list_devices":
+            return self._list_input_devices()
+        if cmd == "set_device":
+            with self._lock:
+                return self._set_input_device(command.get("device"))
         event = {"toggle": Event.TOGGLE, "cancel": Event.CANCEL}.get(cmd)
         if event is None:
             return {"status": "error", "error": f"unknown command: {cmd!r}"}
@@ -133,14 +182,29 @@ class Daemon:
             )
             if self._dump_recording_to is not None:
                 _write_wav(self._dump_recording_to, buffer)
-            if rms < self._silence_threshold:
-                # RMS below threshold ⇒ effectively silence; skip transcription so
-                # Whisper can't hallucinate a phantom word. Tune via config.silence_threshold
-                # using the logged rms of a real utterance vs. ambient.
-                print(f"whispr: rms {rms:.4f} < {self._silence_threshold} — no speech", flush=True)
+            if rms < self._silence_threshold and peak < self._peak_threshold:
+                # Below BOTH the rms floor and the peak floor ⇒ effectively silence;
+                # skip transcription so Whisper can't hallucinate a phantom word. The
+                # peak clause rescues quiet mics (Bluetooth HFP captures speech with
+                # loud transient peaks but low rms — an rms-only gate drops it as
+                # "no speech"). Tune silence_threshold/peak_threshold from the logged
+                # rms=/peak= of a real utterance vs. ambient.
+                print(
+                    f"whispr: rms {rms:.4f}<{self._silence_threshold} and "
+                    f"peak {peak:.3f}<{self._peak_threshold} — no speech",
+                    flush=True,
+                )
                 self._emit("no speech detected")
                 self.state = State.IDLE
                 return {"status": "ok", "state": self.state.name, "device": self._device()}
+            # Gate ran on the RAW level (so silence is still rejected); now lift a
+            # quiet-but-real capture to a level Whisper hears clearly (Bluetooth HFP
+            # mics are notably quiet). Flat gain, so it never manufactures speech.
+            if self._normalize:
+                buffer = normalize_peak(buffer)
+                new_peak = float(np.abs(np.asarray(buffer, dtype=np.float32)).max()) if n else 0.0
+                if new_peak > peak + 1e-6:
+                    print(f"whispr: normalized peak {peak:.3f} → {new_peak:.3f}", flush=True)
             self._emit("transcribing")
             self._spawn(lambda: self._worker(buffer))
         elif effect is Effect.DISCARD:
@@ -190,7 +254,7 @@ def _build_from_config(config):
     import subprocess
 
     from .injector import Injector
-    from .recorder import Recorder, make_sounddevice_stream
+    from .recorder import Recorder, list_input_devices
     from .transcriber import Transcriber
 
     def notify(message: str) -> None:
@@ -200,9 +264,12 @@ def _build_from_config(config):
             pass
 
     notifier = notify if config.notify else None
-    # Bind the configured capture device into the stream-factory seam.
+    # Seed the recorder with the configured capture device; the tray can swap it at
+    # runtime via `set_device` (recorder.device is a plain mutable attribute). When
+    # BT auto-switch is off, disable the profile-switch seam with a no-op.
     recorder = Recorder(
-        stream_factory=lambda cb: make_sounddevice_stream(cb, device=config.input_device)
+        device=config.input_device,
+        prepare_device=None if config.bluetooth_autoswitch else (lambda _device: None),
     )
     transcriber = Transcriber(config, notify=notifier)
     injector = Injector()
@@ -222,7 +289,7 @@ def _build_from_config(config):
             capture=capture,
         )
     dump_to = (config.cache_dir / "last_recording.wav") if config.dump_last_recording else None
-    return recorder, transcriber, injector, rewriter, notifier, dump_to
+    return recorder, transcriber, injector, rewriter, notifier, dump_to, list_input_devices
 
 
 def run_daemon() -> int:
@@ -239,7 +306,9 @@ def run_daemon() -> int:
     config = load()
     print(f"whispr: loading Whisper on device={config.device} …", flush=True)
     t0 = time.monotonic()
-    recorder, transcriber, injector, rewriter, notifier, dump_to = _build_from_config(config)
+    recorder, transcriber, injector, rewriter, notifier, dump_to, list_devices = _build_from_config(
+        config
+    )
     print(
         f"whispr: model warm on device={transcriber.active_device} "
         f"in {time.monotonic() - t0:.1f}s",
@@ -254,6 +323,9 @@ def run_daemon() -> int:
         notify=notifier,
         dump_recording_to=dump_to,
         silence_threshold=config.silence_threshold,
+        peak_threshold=config.peak_threshold,
+        normalize_audio=config.normalize_audio,
+        list_devices=list_devices,
     )
 
     server = ipc.serve(ipc.DEFAULT_SOCK_PATH)

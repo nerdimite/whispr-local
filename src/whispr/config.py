@@ -60,11 +60,28 @@ class Config:
     # substring of the device name (e.g. "Digital Microphone"). Pin this so a
     # bluetooth headset connecting/disconnecting can't silently steal the default.
     input_device: str | int | None = None
+    # When recording from a Bluetooth headset, briefly switch its card into the
+    # HFP/HSP "headset" profile so the mic works (A2DP hi-fi playback has no mic),
+    # then restore the previous profile when recording stops. Set False to leave
+    # profile switching to you / the desktop (then a BT mic only works if you've
+    # already put the headset in Headset mode). Needs PipeWire's `wpctl`/`pw-dump`.
+    bluetooth_autoswitch: bool = True
     # RMS below this ⇒ treat the capture as silence (skip Whisper, which otherwise
     # hallucinates whole phantom sentences on near-silence/ambient). Default sits above
     # a typical laptop-mic noise floor; tune from the daemon's logged rms if speech is
     # dropped (lower it) or ambient still transcribes (raise it).
     silence_threshold: float = 0.02
+    # A capture also passes the silence gate if its loudest sample clears this, even
+    # when rms is below silence_threshold. Quiet mics (Bluetooth headsets in HFP mode)
+    # capture speech as brief loud peaks over a low average, which an rms-only gate
+    # wrongly drops as "no speech". Sits well above ambient peaks (~0.005) and below
+    # speech peaks (~0.1); lower it if a distant/quiet mic still reports "no speech".
+    peak_threshold: float = 0.05
+    # Peak-normalize a captured utterance (after the silence gate) so quiet mics —
+    # notably Bluetooth headsets in HFP mode — are lifted to a level Whisper hears
+    # clearly, instead of forcing you to speak right into the mic. Flat gain, capped,
+    # boost-only; set False to feed Whisper the raw capture.
+    normalize_audio: bool = True
     # --- dictation-copilot rewrite stage (cloud OpenAI for now, see ROADMAP) --
     # Off by default. When true the daemon runs the transcript through a cloud
     # LLM for cleanup + vocabulary correction before pasting. NOTE: this sends

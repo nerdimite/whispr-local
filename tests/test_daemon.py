@@ -16,10 +16,11 @@ from whispr.daemon import Daemon
 
 
 class FakeRecorder:
-    def __init__(self, buffer=None):
+    def __init__(self, buffer=None, device=None):
         self.buffer = np.ones(8, dtype=np.float32) if buffer is None else buffer
         self.started = False
         self.stopped = False
+        self.device = device
 
     def start(self):
         self.started = True
@@ -27,6 +28,9 @@ class FakeRecorder:
     def stop(self):
         self.stopped = True
         return self.buffer
+
+    def set_device(self, device):
+        self.device = device
 
 
 class FakeTranscriber:
@@ -157,6 +161,27 @@ def test_silence_skips_transcription():
     assert any("no speech" in n.lower() for n in notes)
 
 
+def test_quiet_speech_with_loud_peak_passes_gate():
+    # A Bluetooth-HFP-style capture: rms below silence_threshold (0.02) but with loud
+    # transient peaks (> peak_threshold). The peak clause must let it transcribe
+    # rather than dropping it as "no speech".
+    buf = np.full(16000, 0.002, dtype=np.float32)
+    buf[:20] = 0.12  # brief speech transients → peak 0.12, rms ~0.004
+    rms = float(np.sqrt(np.mean(buf**2)))
+    assert rms < 0.02  # would fail an rms-only gate
+    rec = FakeRecorder(buffer=buf)
+    trans = FakeTranscriber(text="hello")
+    inj = FakeInjector()
+    daemon = make_daemon(recorder=rec, transcriber=trans, injector=inj)
+
+    daemon.handle({"cmd": "toggle"})
+    daemon.handle({"cmd": "toggle"})
+    daemon._worker_thread.join(timeout=5)
+
+    assert trans.calls == 1
+    assert inj.injected == ["hello"]
+
+
 def test_cancel_discards_recording():
     rec = FakeRecorder()
     trans = FakeTranscriber()
@@ -198,10 +223,89 @@ def test_dump_last_recording_writes_wav(tmp_path):
     assert dump.exists() and dump.stat().st_size > 44  # header + samples
 
 
+class PeakCapturingTranscriber:
+    """Records the peak amplitude of the buffer it's handed (to assert on gain)."""
+
+    active_device = "CPU"
+
+    def __init__(self):
+        self.peak = None
+
+    def transcribe(self, buffer):
+        self.peak = float(np.abs(np.asarray(buffer, dtype=np.float32)).max())
+        return "ok"
+
+
+def test_quiet_capture_is_normalized_before_transcription():
+    # A quiet-but-real capture (peak 0.1, rms 0.1 > threshold) should be lifted
+    # toward full scale before Whisper sees it.
+    rec = FakeRecorder(buffer=np.full(16000, 0.1, dtype=np.float32))
+    trans = PeakCapturingTranscriber()
+    daemon = make_daemon(recorder=rec, transcriber=trans)  # normalize on by default
+
+    daemon.handle({"cmd": "toggle"})
+    daemon.handle({"cmd": "toggle"})
+    daemon._worker_thread.join(timeout=5)
+
+    assert trans.peak is not None and trans.peak > 0.9
+
+
+def test_normalization_can_be_disabled():
+    rec = FakeRecorder(buffer=np.full(16000, 0.1, dtype=np.float32))
+    trans = PeakCapturingTranscriber()
+    daemon = make_daemon(recorder=rec, transcriber=trans, normalize_audio=False)
+
+    daemon.handle({"cmd": "toggle"})
+    daemon.handle({"cmd": "toggle"})
+    daemon._worker_thread.join(timeout=5)
+
+    assert trans.peak is not None and abs(trans.peak - 0.1) < 1e-4  # raw level preserved
+
+
 def test_device_reported_from_transcriber():
     trans = FakeTranscriber(active_device="NPU")
     daemon = make_daemon(transcriber=trans)
     assert daemon.handle({"cmd": "status"})["device"] == "NPU"
+
+
+# -- Microphone selection ----------------------------------------------------
+
+def test_list_devices_reports_devices_and_current():
+    devices = [
+        {"device": "alsa_input.builtin", "name": "Built-in", "is_default": True},
+        {"device": "bluez_input.jbl", "name": "USB mic", "is_default": False},
+    ]
+    rec = FakeRecorder(device="bluez_input.jbl")
+    daemon = make_daemon(recorder=rec, list_devices=lambda: devices)
+
+    reply = daemon.handle({"cmd": "list_devices"})
+    assert reply == {"status": "ok", "devices": devices, "current": "bluez_input.jbl"}
+
+
+def test_list_devices_without_enumerator_returns_empty():
+    daemon = make_daemon(recorder=FakeRecorder(device=None))
+    reply = daemon.handle({"cmd": "list_devices"})
+    assert reply == {"status": "ok", "devices": [], "current": None}
+
+
+def test_set_device_switches_recorder_when_idle():
+    rec = FakeRecorder(device=None)
+    daemon = make_daemon(recorder=rec)
+
+    reply = daemon.handle({"cmd": "set_device", "device": 3})
+    assert reply == {"status": "ok", "state": "IDLE", "current": 3}
+    assert rec.device == 3
+
+
+def test_set_device_rejected_while_recording():
+    rec = FakeRecorder(device=1)
+    daemon = make_daemon(recorder=rec)
+    daemon.handle({"cmd": "toggle"})  # -> RECORDING
+
+    reply = daemon.handle({"cmd": "set_device", "device": 7})
+    assert reply["status"] == "busy"
+    assert reply["current"] == 1  # unchanged
+    assert rec.device == 1
 
 
 # -- Rewrite stage (transcript → rewrite → inject, dictation-copilot) --------
