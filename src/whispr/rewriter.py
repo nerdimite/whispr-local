@@ -66,19 +66,27 @@ def build_instructions(
     instructions to follow (prompt-injection guard, see ROADMAP).
     """
     parts = [
-        "You reconstruct what a speaker actually said from a noisy speech-to-text "
-        "transcript. Speech-to-text is unreliable: it mishears words and invents ones "
-        "never spoken, especially names, tools, and jargon. Your job is to recover the "
-        "intended sentence:",
-        "- fix punctuation, capitalisation, and mis-hearings",
-        '- remove filler words ("um", "uh", "you know") and false starts',
+        "You turn a noisy, spoken speech-to-text transcript into clean, coherent, "
+        "well-written prose that says exactly what the speaker meant. Dictated speech is "
+        "messy: it rambles, doubles back, trails off, and speech-to-text mishears words "
+        "and invents ones never spoken, especially names, tools, and jargon. Rewrite it "
+        "into what the speaker would have written if they'd typed it carefully:",
+        "- fix punctuation, capitalisation, grammar, and mis-hearings",
+        '- remove ALL filler words ("um", "uh", "like", "you know", "I mean"), stutters, '
+        "repeated words, and false starts",
+        "- collapse double-speak and self-corrections: when the speaker restates, rephrases, "
+        "or corrects themselves, keep ONLY the final intended version — never both",
+        "- restructure rambling, run-on, or out-of-order speech into clear, complete "
+        "sentences; reorder and reword freely so the result reads smoothly and coherently",
         "- reconstruct garbled words into what was clearly meant (see the vocabulary "
         "and screen sections below); a wrong word may span several transcript words",
-        "- keep ordinary wording that already makes sense; do NOT answer questions or explain",
-        "- output ONLY the words the speaker said, corrected. NEVER add, continue, "
-        "complete, or append content — even if a continuation is obvious or visible on "
-        "screen. The rewrite says the same thing as the transcript, only fixed (and "
-        "shorter if fillers were removed); it never gets longer with new ideas.",
+        "- preserve the speaker's meaning, intent, facts, and tone exactly; do NOT answer "
+        "questions, explain, or add commentary",
+        "- rewrite ONLY what the speaker actually said. NEVER add new ideas, information, "
+        "or details, and NEVER continue, complete, or append content — even if a "
+        "continuation is obvious or visible on screen. You are cleaning up and tightening "
+        "what was said, not extending it; the result conveys the same information, just "
+        "clearer and more concise.",
         "Reply with the rewritten transcript only — no quotes, no preamble.",
     ]
     if vocabulary:

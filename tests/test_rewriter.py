@@ -7,7 +7,7 @@ from whispr.rewriter import Rewriter, build_instructions, clean_reply
 def test_instructions_contain_core_rules():
     instr = build_instructions()
     assert "rewritten transcript only" in instr.lower()
-    assert "remove filler" in instr.lower()
+    assert "filler" in instr.lower()
 
 
 def test_instructions_omit_vocabulary_section_when_empty():
