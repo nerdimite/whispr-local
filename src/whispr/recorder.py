@@ -55,13 +55,15 @@ class Recorder:
         except Exception:
             self._restore = None
         try:
-            self._stream = self._stream_factory(self._callback, self.device)
             try:
+                self._stream = self._stream_factory(self._callback, self.device)
                 self._stream.start()
             except Exception:
                 # A long-lived daemon can wedge PortAudio into "PortAudio not initialized"
-                # (seen under PipeWire). Reset the backend and rebuild the stream once so
-                # the user's single toggle still records instead of needing a restart.
+                # (seen under PipeWire), or its cached device table can miss a source that
+                # just appeared (e.g. a bluez_input.* node created by the profile switch
+                # above). Reset the backend and rebuild the stream once so the user's
+                # single toggle still records instead of needing a restart.
                 try:
                     self._stream.close()
                 except Exception:
